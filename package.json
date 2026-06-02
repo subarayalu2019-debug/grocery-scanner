@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@puter/sdk": "^2.0.0",
+    "@puter/sdk": "latest",
     "express": "^4.19.0"
   }
-} 
+}
