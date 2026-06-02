@@ -8,11 +8,6 @@
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 25px; }
-        .api-setup-section { background: #e8f4fd; padding: 20px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #bee3f8; }
-        .api-input-container { display: flex; gap: 10px; margin-top: 8px; }
-        .api-input-container input { flex: 1; padding: 10px; border: 1px solid #cbd5e0; border-radius: 5px; font-size: 14px; }
-        .save-key-btn { padding: 10px 20px; background: #4a5568; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .save-key-btn:hover { background: #2d3748; }
         .upload-section { text-align: center; padding: 30px; border: 2px dashed #3498db; background: #ecf0f1; border-radius: 8px; margin-bottom: 25px; }
         input[type="file"] { display: none; }
         .custom-file-upload { display: inline-block; padding: 10px 20px; background: #3498db; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; }
@@ -33,25 +28,17 @@
 <div class="container">
     <h1>🧾 Live AI Grocery Bill Scanner & Translator</h1>
     
-    <div class="api-setup-section">
-        <label><strong>🔑 STEP 1: Enter Google Gemini API Key:</strong></label>
-        <div class="api-input-container">
-            <input type="password" id="apiKey" placeholder="Paste your secret AIzaSy... key here">
-            <button class="save-key-btn" onclick="saveKey()">Apply Key</button>
-        </div>
-    </div>
-
     <div class="upload-section">
         <label class="custom-file-upload">
             <input type="file" id="billImage" accept="image/*" onchange="previewImage(this)">
-            📁 STEP 2: Upload Real Grocery Bill
+            📁 Upload Real Grocery Bill
         </label>
         <br>
         <img id="preview" src="" alt="Bill Preview">
-        <button class="scan-btn" id="processBtn" onclick="processBill()">STEP 3: Scan Live Bill Now</button>
+        <button class="scan-btn" id="processBtn" onclick="processBill()">Scan Live Bill Now</button>
     </div>
 
-    <div id="loading">⏳ Reading your live bill and translating... Please wait...</div>
+    <div id="loading">⏳ Server is running the AI analysis layout... Please wait...</div>
 
     <div class="results-grid">
         <div class="panel">
@@ -74,18 +61,6 @@
 
 <script>
     let base64Image = "";
-    let base64MimeType = "image/jpeg"; // Default fallback
-    let activeApiKey = "";
-
-    function saveKey() {
-        const keyInput = document.getElementById('apiKey').value.trim();
-        if (!keyInput) {
-            alert("Please paste a key string into the input box first.");
-            return;
-        }
-        activeApiKey = keyInput;
-        alert("API Key configured successfully!");
-    }
 
     function previewImage(input) {
         const file = input.files[0];
@@ -97,20 +72,12 @@
 
         const reader = new FileReader();
         reader.onloadend = function() {
-            const sections = reader.result.split(',');
-            base64Image = sections[1];
-            // Match the exact image format uploaded (png, jpeg, etc.)
-            const match = sections[0].match(/:(.*?);/);
-            if (match) base64MimeType = match[1];
+            base64Image = reader.result.split(',')[1];
         }
         reader.readAsDataURL(file);
     }
 
     async function processBill() {
-        if (!activeApiKey) {
-            alert("Error: You must click 'Apply Key' in the API setup section first!");
-            return;
-        }
         if (!base64Image) {
             alert("Please upload a picture of a bill first!");
             return;
@@ -119,59 +86,49 @@
         const loading = document.getElementById('loading');
         loading.style.display = 'block';
 
-        const prompt = `Analyze the uploaded grocery bill image. Extract all real items present. For each item, extract its true name, quantity, and unit price. Calculate final_price as (quantity * price). Translate item names to Tamil. Return ONLY a clean JSON object matching this structure exactly without backticks or markdown wrappers: {"english": [{"item": "string", "qty": number, "price": number, "final_price": number}], "tamil": [{"item": "string", "qty": number, "price": number, "final_price": number}], "english_grand_total": number, "tamil_grand_total": number}`;
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeApiKey}`;
-
         try {
-            const response = await fetch(url, {
+            const response = await fetch("/api/scan-bill", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: base64MimeType, data: base64Image } }] }]
-                })
+                body: JSON.stringify({ image: base64Image })
             });
 
-            const data = await response.json();
+            const parsedData = await response.json();
             
-            // Check if Google sent an explicit server error block back
-            if (data.error) {
-                alert(`Google API Error: ${data.error.message} (${data.error.status})`);
+            if (parsedData.error) {
+                alert(`API Error: ${parsedData.error}`);
                 return;
             }
 
-            if (!data.candidates || data.candidates.length === 0) {
-                throw new Error("Empty response channels received.");
-            }
-
-            let rawText = data.candidates[0].content.parts[0].text;
-            rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-            
-            const parsedData = JSON.parse(rawText);
             renderTables(parsedData);
 
         } catch (error) {
             console.error(error);
-            alert("Processing error: Failed to translate data layout. Ensure image content is readable.");
+            alert("Connection error: Failed to reach your backend server instance.");
         } finally {
             loading.style.display = 'none';
         }
     }
 
+    // Fixed mapping function to properly read array properties
     function renderTables(data) {
         const engBody = document.getElementById('english-items');
         const tamBody = document.getElementById('tamil-items');
         engBody.innerHTML = ""; tamBody.innerHTML = "";
 
-        data.english.forEach(item => {
-            engBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
-        });
-        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${Number(data.english_grand_total).toFixed(2)}</td></tr>`;
+        if(data.english) {
+            data.english.forEach(item => {
+                engBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+            });
+        }
+        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${Number(data.english_grand_total || 0).toFixed(2)}</td></tr>`;
 
-        data.tamil.forEach(item => {
-            tamBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
-        });
-        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${Number(data.tamil_grand_total).toFixed(2)}</td></tr>`;
+        if(data.tamil) {
+            data.tamil.forEach(item => {
+                tamBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+            });
+        }
+        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${Number(data.tamil_grand_total || 0).toFixed(2)}</td></tr>`;
     }
 </script>
 </body>
