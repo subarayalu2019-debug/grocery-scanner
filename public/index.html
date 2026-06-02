@@ -1,10 +1,17 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Universal Live AI Grocery Scanner</title>
-    <script src="https://js.puter.com/v2/"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/generative-ai": "https://esm.run/@google/generative-ai"
+        }
+      }
+    </script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
@@ -40,7 +47,7 @@
         <button class="scan-btn" id="processBtn" onclick="processLiveBill()">Scan Live Bill Now</button>
     </div>
 
-    <div id="loading">⏳ True AI is reading your receipt items and translating dynamically... Please wait...</div>
+    <div id="loading">⏳ Gemini AI is analyzing the receipt and translating dynamically... Please wait...</div>
 
     <div class="results-grid">
         <div class="panel">
@@ -61,51 +68,38 @@
     </div>
 </div>
 
-<script>
-    let optimizedImageFile = null;
+<script type="module">
+    import { GoogleGenAI } from "@google/generative-ai";
 
-    function handleImage(input) {
+    // 🔑 PASTE YOUR COPIED GEMINI API KEY DIRECTLY INSIDE THE QUOTES BELOW:
+    const API_KEY = "AQ.Ab8RN6I2Foa0JsNcdKmEZD3KkIVlQ3gWaOwNdecB6LlLoeOWbw";
+
+    let base64ImageString = "";
+    let imageMimeType = "image/jpeg";
+
+    window.handleImage = function(input) {
         const file = input.files[0];
         if (!file) return;
 
+        imageMimeType = file.type;
         const preview = document.getElementById('preview');
         preview.src = URL.createObjectURL(file);
         preview.style.display = 'inline-block';
 
-        // Automatically downscale image size so the free AI API never chokes
         const reader = new FileReader();
-        reader.onload = function (e) {
-            const img = new Image();
-            img.onload = function () {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-
-                // Max resize boundary rule
-                const MAX_WIDTH = 800;
-                if (width > MAX_WIDTH) {
-                    height = Math.round((height * MAX_WIDTH) / width);
-                    width = MAX_WIDTH;
-                }
-
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-
-                // Convert canvas data back to a small blob file object for Puter
-                canvas.toBlob(function (blob) {
-                    optimizedImageFile = new File([blob], "optimized_bill.jpg", { type: "image/jpeg" });
-                }, 'image/jpeg', 0.7); // 70% compression quality setup
-            };
-            img.src = e.target.result;
+        reader.onloadend = function() {
+            base64ImageString = reader.result.split(',')[1];
         };
         reader.readAsDataURL(file);
     }
 
-    async function processLiveBill() {
-        if (!optimizedImageFile) {
-            alert("Please upload a grocery bill image first or wait a second for optimization!");
+    window.processLiveBill = async function() {
+        if (!base64ImageString) {
+            alert("Please upload a grocery bill image first!");
+            return;
+        }
+        if (API_KEY === "PASTE_YOUR_GEMINI_KEY_HERE") {
+            alert("Please replace the text on line 71 with your actual Gemini API Key!");
             return;
         }
 
@@ -113,66 +107,48 @@
         loading.style.display = 'block';
 
         try {
-            const aiPrompt = `Look at this grocery bill. Completely ignore company names, store addresses, tax headers, payment methods, cashiers, and footer summaries. Extract ONLY the actual grocery products bought. For each product, find its true name, quantity, and unit price. Return ONLY a valid JSON string matching this structure exactly without markdown code blocks, triple backticks or the word json: {"products": [{"name": "Item Name", "qty": 1, "price": 4.50}]}`;
-            
-            const textResult = await puter.ai.txt2txt(aiPrompt, optimizedImageFile);
-            
-            // Clean up text text string layout filters
-            let cleanJsonText = textResult.toString().replace(/```json/g, "").replace(/```/g, "").trim();
-            
-            // Safety parsing patch
-            if (cleanJsonText.startsWith("json")) {
-                cleanJsonText = cleanJsonText.substring(4).trim();
-            }
+            const ai = new GoogleGenAI({ apiKey: API_KEY });
+            const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+            const aiPrompt = `Look closely at this grocery bill image. Completely ignore company store names, addresses, cashiers, tax codes, payment methods, and receipt totals. Extract ONLY the true grocery items purchased. For each item, capture its name, quantity, and unit price. Translate the item name into spoken Tamil script. Calculate the final price as (quantity * price). Return ONLY a clean JSON object structure exactly matching this layout without markdown or backticks: 
+            {"english": [{"item": "Name", "qty": 1, "price": 10.00, "final_price": 10.00}], "tamil": [{"item": "பெயர்", "qty": 1, "price": 10.00, "final_price": 10.00}], "english_grand_total": 10.00, "tamil_grand_total": 10.00}`;
+
+            const imagePart = {
+                inlineData: {
+                    data: base64ImageString,
+                    mimeType: imageMimeType
+                },
+            };
+
+            const result = await model.generateContent([aiPrompt, imagePart]);
+            const responseText = await result.response.text();
+            
+            let cleanJsonText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
             const parsedData = JSON.parse(cleanJsonText);
-            await processItemsAndTranslate(parsedData.products);
+            
+            renderTables(parsedData);
         } catch (error) {
             console.error(error);
-            alert("AI scanning error. Please make sure the photo is well-lit and crop out extra blank borders if it fails again.");
+            alert("AI scanning error. Please make sure the API key is correct and try again.");
         } finally {
             loading.style.display = 'none';
         }
     }
 
-    async function processItemsAndTranslate(products) {
+    function renderTables(data) {
         const engBody = document.getElementById('english-items');
         const tamBody = document.getElementById('tamil-items');
         engBody.innerHTML = ""; tamBody.innerHTML = "";
 
-        let grandTotal = 0;
+        data.english.forEach(item => {
+            engBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+        });
+        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${Number(data.english_grand_total).toFixed(2)}</td></tr>`;
 
-        for (let item of products) {
-            let qty = Number(item.qty) || 1;
-            let price = Number(item.price) || 0;
-            let finalPrice = qty * price;
-            grandTotal += finalPrice;
-
-            engBody.innerHTML += `<tr>
-                <td>${item.name}</td>
-                <td>${qty}</td>
-                <td>${price.toFixed(2)}</td>
-                <td>${finalPrice.toFixed(2)}</td>
-            </tr>`;
-
-            let tamilName = "";
-            try {
-                const translationText = await puter.ai.txt2txt(`Translate this exact grocery item name to standard spoken Tamil script. Reply with ONLY the Tamil words, no English explanation: "${item.name}"`);
-                tamilName = translationText.toString().trim();
-            } catch(e) {
-                tamilName = `பொருள் - ${item.name}`;
-            }
-
-            tamBody.innerHTML += `<tr>
-                <td>${tamilName}</td>
-                <td>${qty}</td>
-                <td>${price.toFixed(2)}</td>
-                <td>${finalPrice.toFixed(2)}</td>
-            </tr>`;
-        }
-
-        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${grandTotal.toFixed(2)}</td></tr>`;
-        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${grandTotal.toFixed(2)}</td></tr>`;
+        data.tamil.forEach(item => {
+            tamBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+        });
+        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${Number(data.tamil_grand_total).toFixed(2)}</td></tr>`;
     }
 </script>
 </body>
