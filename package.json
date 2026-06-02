@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.0",
-    "tesseract.js": "^5.1.0"
+    "@google/genai": "^0.1.1",
+    "express": "^4.19.0"
   }
 }
