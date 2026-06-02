@@ -1,9 +1,14 @@
-const express = require('express');
-const path = require('path');
-const Tesseract = require('tesseract.js');
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import Tesseract from 'tesseract.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Fix for using __dirname in modern ES Modules format
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Serve static frontend files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
