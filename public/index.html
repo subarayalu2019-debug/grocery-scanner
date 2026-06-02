@@ -1,17 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Universal Live AI Grocery Scanner</title>
-    <script type="importmap">
-      {
-        "imports": {
-          "@google/generative-ai": "https://esm.run/@google/generative-ai"
-        }
-      }
-    </script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
@@ -68,17 +60,11 @@
     </div>
 </div>
 
-<script type="module">
-    // Corrected the imported library class matching name
-    import { GoogleGenerativeAI } from "@google/generative-ai";
-
-    // 🔑 PASTE YOUR GEMINI API KEY DIRECTLY INSIDE THE QUOTES BELOW:
-    const API_KEY = "AQ.Ab8RN6I2Foa0JsNcdKmEZD3KkIVlQ3gWaOwNdecB6LlLoeOWbw";
-
+<script>
     let base64ImageString = "";
     let imageMimeType = "image/jpeg";
 
-    window.handleImage = function(input) {
+    function handleImage(input) {
         const file = input.files[0];
         if (!file) return;
 
@@ -94,13 +80,9 @@
         reader.readAsDataURL(file);
     }
 
-    window.processLiveBill = async function() {
+    async function processLiveBill() {
         if (!base64ImageString) {
             alert("Please upload a grocery bill image first!");
-            return;
-        }
-        if (API_KEY === "PASTE_YOUR_GEMINI_KEY_HERE" || API_KEY.trim() === "") {
-            alert("Please replace line 74 with your real Gemini API Key!");
             return;
         }
 
@@ -108,11 +90,43 @@
         loading.style.display = 'block';
 
         try {
-            // Corrected initialization structure call
-            const genAI = new GoogleGenerativeAI(API_KEY);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const response = await fetch("/api/scan-bill", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image: base64ImageString, mimeType: imageMimeType })
+            });
 
-            const aiPrompt = `Look closely at this grocery bill image. Completely ignore store addresses, phone numbers, cashiers, tax codes, payment layouts, and invoice totals. Extract ONLY the true individual items purchased. For each item, capture its clean name, quantity, and unit price. Calculate final_price as (quantity * price). Translate the item name into common spoken Tamil script. Return ONLY a valid JSON object structure exactly matching this layout structure without markdown, formatting blocks, or backticks: 
-            {"english": [{"item": "Name", "qty": 1, "price": 10.00, "final_price": 10.00}], "tamil": [{"item": "பெயர்", "qty": 1, "price": 10.00, "final_price": 10.00}], "english_grand_total": 10.00, "tamil_grand_total": 10.00}`;
+            const parsedData = await response.json();
+            
+            if (parsedData.error) {
+                alert(`Error: ${parsedData.error}`);
+                return;
+            }
 
-            const imagePart =
+            renderTables(parsedData);
+        } catch (error) {
+            console.error(error);
+            alert("Connection timed out. Check the Render dashboard logs to see what stopped it.");
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    function renderTables(data) {
+        const engBody = document.getElementById('english-items');
+        const tamBody = document.getElementById('tamil-items');
+        engBody.innerHTML = ""; tamBody.innerHTML = "";
+
+        data.english.forEach(item => {
+            engBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+        });
+        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${Number(data.english_grand_total).toFixed(2)}</td></tr>`;
+
+        data.tamil.forEach(item => {
+            tamBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
+        });
+        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${Number(data.tamil_grand_total).toFixed(2)}</td></tr>`;
+    }
+</script>
+</body>
+</html>
