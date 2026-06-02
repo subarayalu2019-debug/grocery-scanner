@@ -26,16 +26,21 @@ app.post('/api/scan-bill', async (req, res) => {
         const aiPrompt = `Look closely at this grocery bill image. Completely ignore store names, store addresses, phone numbers, cashiers, tax layout codes, payment methods, and receipt totals. Extract ONLY the true individual grocery items purchased. For each item, capture its clean name, quantity, and unit price. Calculate final_price as (quantity * price). Translate the item name into common spoken Tamil script. You must strictly match this structure schema precisely:
         {"english": [{"item": "Name", "qty": 1, "price": 10.00, "final_price": 10.00}], "tamil": [{"item": "பெயர்", "qty": 1, "price": 10.00, "final_price": 10.00}], "english_grand_total": 10.00, "tamil_grand_total": 10.00}`;
 
-        // Fixed Multi-modal layout array structure for the new Google Gen AI SDK
+        // Verified multi-modal structural configuration for the @google/genai library
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [
-                aiPrompt,
                 {
-                    inlineData: {
-                        mimeType: mimeType || "image/jpeg",
-                        data: image
-                    }
+                    role: 'user',
+                    parts: [
+                        { text: aiPrompt },
+                        {
+                            inlineData: {
+                                mimeType: mimeType || "image/jpeg",
+                                data: image
+                            }
+                        }
+                    ]
                 }
             ],
             config: {
@@ -43,7 +48,6 @@ app.post('/api/scan-bill', async (req, res) => {
             }
         });
 
-        // Pull the text response payload string safely
         const cleanJsonText = response.text.trim();
         res.json(JSON.parse(cleanJsonText));
 
