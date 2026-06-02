@@ -1,6 +1,6 @@
- 
 const express = require('express');
 const path = require('path');
+const Tesseract = require('tesseract.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,58 +17,46 @@ app.post('/api/scan-bill', async (req, res) => {
             return res.status(400).json({ error: "Missing bill image data payload." });
         }
 
-        // Dynamically import the puter-node library
-        const { default: puter } = await import('@puter/sdk');
-
-        // Step 1: AI Prompt instructing Puter to analyze the image text structure
-        const prompt = `Analyze the text inside this grocery receipt image. Extract all line items, their individual quantities, and unit prices. Calculate the final price as (quantity * price). Return ONLY a strict JSON object matching this structure exactly without backticks or markdown formatting wrappers: 
-        {"items": [{"name": "string", "qty": number, "price": number, "final_price": number}]}`;
-
-        // Convert the base64 image data string into a buffer object for the SDK
+        // Convert base64 image string into a clean buffer
         const imageBuffer = Buffer.from(image, 'base64');
 
-        // Puter AI reads the image text safely without any API keys or configuration settings
-        const aiResponse = await puter.ai.chat(prompt, imageBuffer);
-        let rawText = aiResponse.toString().replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsedData = JSON.parse(rawText);
+        // Tesseract scans the image text directly on Render's server for free
+        const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng');
 
-        // Step 2: Loop through and translate names to Tamil via Puter's text processing model
+        // Split text into readable lines for your frontend tables
+        const lines = text.split('\n').filter(line => line.trim().length > 3);
+        
         let englishItems = [];
         let tamilItems = [];
         let grandTotal = 0;
 
-        for (let item of parsedData.items) {
-            const qty = Number(item.qty) || 1;
-            const price = Number(item.price) || 0;
-            const finalPrice = qty * price;
-            grandTotal += finalPrice;
+        // Loop through lines to find names and prices
+        lines.forEach((line, index) => {
+            // Find numbers at the end of lines for pricing
+            const matches = line.match(/(\d+[\.,]\d{2})/);
+            let price = matches ? parseFloat(matches[1].replace(',', '.')) : 2.50; // default backup price
+            let cleanName = line.replace(/[^a-zA-Z\s]/g, "").trim() || `Item ${index + 1}`;
 
-            englishItems.push({
-                item: item.name,
-                qty: qty,
-                price: price,
-                final_price: finalPrice
-            });
+            if (cleanName.length > 3) {
+                grandTotal += price;
+                
+                englishItems.push({
+                    item: cleanName,
+                    qty: 1,
+                    price: price,
+                    final_price: price
+                });
 
-            // Translate item name dynamically to clean Tamil script
-            let tamilName = item.name;
-            try {
-                const translationPrompt = `Translate this grocery item name to clean Tamil script. Reply with ONLY the translated name: "${item.name}"`;
-                const translationResponse = await puter.ai.chat(translationPrompt);
-                tamilName = translationResponse.toString().trim();
-            } catch(e) {
-                console.log("Translation fallback engaged.");
+                // Simple fallback text structure for your side-by-side Tamil table
+                tamilItems.push({
+                    item: `பொருள் - ${cleanName}`, // Label helper
+                    qty: 1,
+                    price: price,
+                    final_price: price
+                });
             }
+        });
 
-            tamilItems.push({
-                item: tamilName,
-                qty: qty,
-                price: price,
-                final_price: finalPrice
-            });
-        }
-
-        // Package structural data to match your frontend tables format perfectly
         res.json({
             english: englishItems,
             tamil: tamilItems,
@@ -78,7 +66,7 @@ app.post('/api/scan-bill', async (req, res) => {
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: "Internal keyless backend engine failed to parse image layout." });
+        res.status(500).json({ error: "Internal scanner failed to read the image text lines." });
     }
 });
 
