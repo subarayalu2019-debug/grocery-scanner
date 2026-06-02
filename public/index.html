@@ -19,7 +19,7 @@
         .upload-section { text-align: center; padding: 30px; border: 2px dashed #3498db; background: #ecf0f1; border-radius: 8px; margin-bottom: 25px; }
         input[type="file"] { display: none; }
         .custom-file-upload { display: inline-block; padding: 10px 20px; background: #3498db; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        #preview { max-width: 200px; margin-top: 15px; display: none; border: 2px solid #ddd; border-radius: 5px; }
+        #preview { max-width: 250px; margin-top: 15px; display: none; border: 2px solid #ddd; border-radius: 5px; padding: 5px; background: white; }
         .scan-btn { display: block; width: 100%; padding: 14px; background: #2ecc71; color: white; border: none; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 15px; }
         .scan-btn:hover { background: #27ae60; }
         .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
@@ -69,9 +69,10 @@
 </div>
 
 <script type="module">
-    import { GoogleGenAI } from "@google/generative-ai";
+    // Corrected the imported library class matching name
+    import { GoogleGenerativeAI } from "@google/generative-ai";
 
-    // 🔑 PASTE YOUR COPIED GEMINI API KEY DIRECTLY INSIDE THE QUOTES BELOW:
+    // 🔑 PASTE YOUR GEMINI API KEY DIRECTLY INSIDE THE QUOTES BELOW:
     const API_KEY = "AQ.Ab8RN6I2Foa0JsNcdKmEZD3KkIVlQ3gWaOwNdecB6LlLoeOWbw";
 
     let base64ImageString = "";
@@ -83,11 +84,11 @@
 
         imageMimeType = file.type;
         const preview = document.getElementById('preview');
-        preview.src = URL.createObjectURL(file);
-        preview.style.display = 'inline-block';
-
+        
         const reader = new FileReader();
         reader.onloadend = function() {
+            preview.src = reader.result;
+            preview.style.display = 'inline-block';
             base64ImageString = reader.result.split(',')[1];
         };
         reader.readAsDataURL(file);
@@ -98,8 +99,8 @@
             alert("Please upload a grocery bill image first!");
             return;
         }
-        if (API_KEY === "PASTE_YOUR_GEMINI_KEY_HERE") {
-            alert("Please replace the text on line 71 with your actual Gemini API Key!");
+        if (API_KEY === "PASTE_YOUR_GEMINI_KEY_HERE" || API_KEY.trim() === "") {
+            alert("Please replace line 74 with your real Gemini API Key!");
             return;
         }
 
@@ -107,49 +108,11 @@
         loading.style.display = 'block';
 
         try {
-            const ai = new GoogleGenAI({ apiKey: API_KEY });
-            const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+            // Corrected initialization structure call
+            const genAI = new GoogleGenerativeAI(API_KEY);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-            const aiPrompt = `Look closely at this grocery bill image. Completely ignore company store names, addresses, cashiers, tax codes, payment methods, and receipt totals. Extract ONLY the true grocery items purchased. For each item, capture its name, quantity, and unit price. Translate the item name into spoken Tamil script. Calculate the final price as (quantity * price). Return ONLY a clean JSON object structure exactly matching this layout without markdown or backticks: 
+            const aiPrompt = `Look closely at this grocery bill image. Completely ignore store addresses, phone numbers, cashiers, tax codes, payment layouts, and invoice totals. Extract ONLY the true individual items purchased. For each item, capture its clean name, quantity, and unit price. Calculate final_price as (quantity * price). Translate the item name into common spoken Tamil script. Return ONLY a valid JSON object structure exactly matching this layout structure without markdown, formatting blocks, or backticks: 
             {"english": [{"item": "Name", "qty": 1, "price": 10.00, "final_price": 10.00}], "tamil": [{"item": "பெயர்", "qty": 1, "price": 10.00, "final_price": 10.00}], "english_grand_total": 10.00, "tamil_grand_total": 10.00}`;
 
-            const imagePart = {
-                inlineData: {
-                    data: base64ImageString,
-                    mimeType: imageMimeType
-                },
-            };
-
-            const result = await model.generateContent([aiPrompt, imagePart]);
-            const responseText = await result.response.text();
-            
-            let cleanJsonText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-            const parsedData = JSON.parse(cleanJsonText);
-            
-            renderTables(parsedData);
-        } catch (error) {
-            console.error(error);
-            alert("AI scanning error. Please make sure the API key is correct and try again.");
-        } finally {
-            loading.style.display = 'none';
-        }
-    }
-
-    function renderTables(data) {
-        const engBody = document.getElementById('english-items');
-        const tamBody = document.getElementById('tamil-items');
-        engBody.innerHTML = ""; tamBody.innerHTML = "";
-
-        data.english.forEach(item => {
-            engBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
-        });
-        engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${Number(data.english_grand_total).toFixed(2)}</td></tr>`;
-
-        data.tamil.forEach(item => {
-            tamBody.innerHTML += `<tr><td>${item.item}</td><td>${item.qty}</td><td>${Number(item.price).toFixed(2)}</td><td>${Number(item.final_price).toFixed(2)}</td></tr>`;
-        });
-        tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${Number(data.tamil_grand_total).toFixed(2)}</td></tr>`;
-    }
-</script>
-</body>
-</html>
+            const imagePart =
