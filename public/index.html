@@ -62,21 +62,50 @@
 </div>
 
 <script>
-    let imageFileObject = null;
+    let optimizedImageFile = null;
 
     function handleImage(input) {
         const file = input.files[0];
         if (!file) return;
-        imageFileObject = file;
 
         const preview = document.getElementById('preview');
         preview.src = URL.createObjectURL(file);
         preview.style.display = 'inline-block';
+
+        // Automatically downscale image size so the free AI API never chokes
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const img = new Image();
+            img.onload = function () {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                // Max resize boundary rule
+                const MAX_WIDTH = 800;
+                if (width > MAX_WIDTH) {
+                    height = Math.round((height * MAX_WIDTH) / width);
+                    width = MAX_WIDTH;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Convert canvas data back to a small blob file object for Puter
+                canvas.toBlob(function (blob) {
+                    optimizedImageFile = new File([blob], "optimized_bill.jpg", { type: "image/jpeg" });
+                }, 'image/jpeg', 0.7); // 70% compression quality setup
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
     }
 
     async function processLiveBill() {
-        if (!imageFileObject) {
-            alert("Please upload a grocery bill image first!");
+        if (!optimizedImageFile) {
+            alert("Please upload a grocery bill image first or wait a second for optimization!");
             return;
         }
 
@@ -84,17 +113,23 @@
         loading.style.display = 'block';
 
         try {
-            // Puter's multimodal vision engine scans the image directly and ignores headers automatically
-            const aiPrompt = `Look at this grocery bill. Completely ignore company names, store addresses, tax headers, payment methods, cashiers, and footer summaries. Extract ONLY the actual grocery products bought. For each product, find its true name, quantity, and unit price. Return ONLY a valid JSON string matching this structure exactly without markdown or wrappers: {"products": [{"name": "Item Name", "qty": 1, "price": 4.50}]}`;
+            const aiPrompt = `Look at this grocery bill. Completely ignore company names, store addresses, tax headers, payment methods, cashiers, and footer summaries. Extract ONLY the actual grocery products bought. For each product, find its true name, quantity, and unit price. Return ONLY a valid JSON string matching this structure exactly without markdown code blocks, triple backticks or the word json: {"products": [{"name": "Item Name", "qty": 1, "price": 4.50}]}`;
             
-            const textResult = await puter.ai.txt2txt(aiPrompt, imageFileObject);
+            const textResult = await puter.ai.txt2txt(aiPrompt, optimizedImageFile);
+            
+            // Clean up text text string layout filters
             let cleanJsonText = textResult.toString().replace(/```json/g, "").replace(/```/g, "").trim();
-            const parsedData = JSON.parse(cleanJsonText);
             
+            // Safety parsing patch
+            if (cleanJsonText.startsWith("json")) {
+                cleanJsonText = cleanJsonText.substring(4).trim();
+            }
+
+            const parsedData = JSON.parse(cleanJsonText);
             await processItemsAndTranslate(parsedData.products);
         } catch (error) {
             console.error(error);
-            alert("AI scanning error. Make sure your image is clear and try again.");
+            alert("AI scanning error. Please make sure the photo is well-lit and crop out extra blank borders if it fails again.");
         } finally {
             loading.style.display = 'none';
         }
@@ -113,7 +148,6 @@
             let finalPrice = qty * price;
             grandTotal += finalPrice;
 
-            // Render English tables instantly
             engBody.innerHTML += `<tr>
                 <td>${item.name}</td>
                 <td>${qty}</td>
@@ -121,7 +155,6 @@
                 <td>${finalPrice.toFixed(2)}</td>
             </tr>`;
 
-            // Dynamic live translation for ANY text you give it
             let tamilName = "";
             try {
                 const translationText = await puter.ai.txt2txt(`Translate this exact grocery item name to standard spoken Tamil script. Reply with ONLY the Tamil words, no English explanation: "${item.name}"`);
@@ -130,7 +163,6 @@
                 tamilName = `பொருள் - ${item.name}`;
             }
 
-            // Render Tamil layout dynamically
             tamBody.innerHTML += `<tr>
                 <td>${tamilName}</td>
                 <td>${qty}</td>
@@ -139,7 +171,6 @@
             </tr>`;
         }
 
-        // Add correct live calculations to the final rows
         engBody.innerHTML += `<tr class="total-row"><td colspan="3">Grand Total</td><td>${grandTotal.toFixed(2)}</td></tr>`;
         tamBody.innerHTML += `<tr class="total-row"><td colspan="3">மொத்தத் தொகை</td><td>${grandTotal.toFixed(2)}</td></tr>`;
     }
