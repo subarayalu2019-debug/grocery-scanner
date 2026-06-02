@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@puter/sdk": "latest",
-    "express": "^4.19.0"
+    "express": "^4.19.0",
+    "tesseract.js": "^5.1.0"
   }
 }
