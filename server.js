@@ -1,77 +1,66 @@
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Tesseract from 'tesseract.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Fix for using __dirname in modern ES Modules format
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve static frontend files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '10mb' }));
 
 app.post('/api/scan-bill', async (req, res) => {
     try {
-        const { image } = req.body;
+        const { image, mimeType } = req.body;
         
-        if (!image) {
-            return res.status(400).json({ error: "Missing bill image data payload." });
+        // Securely pulls your key from the Render dashboard environment setting
+        const apiKey = process.env.GEMINI_API_KEY;
+
+        if (!apiKey) {
+            return res.status(500).json({ error: "Configuration Error: GEMINI_API_KEY is missing on Render settings." });
         }
 
-        // Convert base64 image string into a clean buffer
-        const imageBuffer = Buffer.from(image, 'base64');
+        const aiPrompt = `Look closely at this grocery bill image. Completely ignore store names, addresses, cashiers, tax codes, payment layouts, and invoice totals. Extract ONLY the true individual grocery items purchased. For each item, capture its name, quantity, and unit price. Calculate final_price as (quantity * price). Translate the item name into common spoken Tamil script. Return ONLY a clean JSON object structure exactly matching this layout structure without markdown code blocks, triple backticks, or the word json: 
+        {"english": [{"item": "Name", "qty": 1, "price": 10.00, "final_price": 10.00}], "tamil": [{"item": "பெயர்", "qty": 1, "price": 10.00, "final_price": 10.00}], "english_grand_total": 10.00, "tamil_grand_total": 10.00}`;
 
-        // Tesseract scans the image text directly on Render's server for free
-        const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        // Split text into readable lines for your frontend tables
-        const lines = text.split('\n').filter(line => line.trim().length > 3);
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: aiPrompt },
+                        { inlineData: { mimeType: mimeType || "image/jpeg", data: image } }
+                    ]
+                }]
+            })
+        });
+
+        const data = await response.json();
         
-        let englishItems = [];
-        let tamilItems = [];
-        let grandTotal = 0;
+        if (data.error) {
+            return res.status(400).json({ error: data.error.message });
+        }
 
-        // Loop through lines to find names and prices
-        lines.forEach((line, index) => {
-            // Find numbers at the end of lines for pricing
-            const matches = line.match(/(\d+[\.,]\d{2})/);
-            let price = matches ? parseFloat(matches[1].replace(',', '.')) : 2.50; // default backup price
-            let cleanName = line.replace(/[^a-zA-Z\s]/g, "").trim() || `Item ${index + 1}`;
+        // Clean out any unexpected markdown text Gemini might wrap around the response
+        let rawText = data.candidates[0].content.parts[0].text;
+        rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+        
+        // Safety check if it still contains a hidden text prefix
+        if (rawText.startsWith("json")) {
+            rawText = rawText.substring(4).trim();
+        }
 
-            if (cleanName.length > 3) {
-                grandTotal += price;
-                
-                englishItems.push({
-                    item: cleanName,
-                    qty: 1,
-                    price: price,
-                    final_price: price
-                });
-
-                // Simple fallback text structure for your side-by-side Tamil table
-                tamilItems.push({
-                    item: `பொருள் - ${cleanName}`, // Label helper
-                    qty: 1,
-                    price: price,
-                    final_price: price
-                });
-            }
-        });
-
-        res.json({
-            english: englishItems,
-            tamil: tamilItems,
-            english_grand_total: grandTotal,
-            tamil_grand_total: grandTotal
-        });
+        res.json(JSON.parse(rawText));
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: "Internal scanner failed to read the image text lines." });
+        res.status(500).json({ error: "The server failed to parse the receipt data structure layout." });
     }
 });
 
